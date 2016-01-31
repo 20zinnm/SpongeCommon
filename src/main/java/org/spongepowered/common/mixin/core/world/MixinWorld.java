@@ -638,44 +638,7 @@ public abstract class MixinWorld implements World, IMixinWorld {
                     return false;
                 }
 
-                EntityLivingBase specialCause = null;
-                String causeName = "";
-                // Special case for throwables
-                if (entityIn instanceof EntityThrowable) {
-                    EntityThrowable throwable = (EntityThrowable) entityIn;
-                    specialCause = throwable.getThrower();
-
-                    if (specialCause != null) {
-                        causeName = NamedCause.THROWER;
-                        if (specialCause instanceof Player) {
-                            Player player = (Player) specialCause;
-                            ((IMixinEntity) entityIn).trackEntityUniqueId(NbtDataUtil.SPONGE_ENTITY_CREATOR, player.getUniqueId());
-                        }
-                    }
-                }
-                // Special case for TNT
-                else if (entityIn instanceof EntityTNTPrimed) {
-                    EntityTNTPrimed tntEntity = (EntityTNTPrimed) entityIn;
-                    specialCause = tntEntity.getTntPlacedBy();
-                    causeName = NamedCause.IGNITER;
-
-                    if (specialCause instanceof Player) {
-                        Player player = (Player) specialCause;
-                        ((IMixinEntity) entityIn).trackEntityUniqueId(NbtDataUtil.SPONGE_ENTITY_CREATOR, player.getUniqueId());
-                    }
-                }
-                // Special case for Tameables
-                else if (entityIn instanceof EntityTameable) {
-                    EntityTameable tameable = (EntityTameable) entityIn;
-                    if (tameable.getOwner() != null) {
-                        specialCause = tameable.getOwner();
-                        causeName = NamedCause.OWNER;
-                    }
-                }
-
-                if (specialCause != null && !cause.containsNamed(causeName)) {
-                    cause = cause.with(NamedCause.of(causeName, specialCause));
-                }
+                cause = SpongeCommonEventFactory.handleExtraCustomCauses(entityIn, cause);
 
                 org.spongepowered.api.event.Event event;
                 ImmutableList.Builder<EntitySnapshot> entitySnapshotBuilder = new ImmutableList.Builder<>();
@@ -683,12 +646,10 @@ public abstract class MixinWorld implements World, IMixinWorld {
 
                 if (entityIn instanceof EntityItem) {
                     this.capturedEntityItems.add((Item) (Object) entityIn);
-                    event = SpongeEventFactory.createDropItemEventCustom(cause, this.capturedEntityItems,
-                                                                         entitySnapshotBuilder.build(), this);
+                    event = SpongeCommonEventFactory.throwItemDropEvent(cause, this.capturedEntityItems, entitySnapshotBuilder.build(), this);
                 } else {
                     this.capturedEntities.add((Entity) entityIn);
-                    event = SpongeEventFactory.createSpawnEntityEventCustom(cause, this.capturedEntities,
-                                                                            entitySnapshotBuilder.build(), this);
+                    event = SpongeCommonEventFactory.throwEntitySpawnCustom(cause, this.capturedEntities, entitySnapshotBuilder.build(), this);
                 }
                 if (!SpongeImpl.postEvent(event) && !entity.isRemoved()) {
                     if (entityIn instanceof EntityWeatherEffect) {
@@ -1032,6 +993,7 @@ public abstract class MixinWorld implements World, IMixinWorld {
                 cause = StaticMixinHelper.dropCause;
                 StaticMixinHelper.destructItemDrop = true;
             }
+            cause = SpongeCommonEventFactory.handleDropCause(cause);
             handleDroppedItems(cause);
         }
         if (this.capturedEntities.size() > 0) {
@@ -2605,4 +2567,53 @@ public abstract class MixinWorld implements World, IMixinWorld {
         return predicate.apply(player) && mixinEntity.isReallyREALLYInvisible();
     }
 
+    /**
+     * @author gabizou - January 31st, 2016
+     *
+     * So you might be wondering why a cancellable instead of an overwrite.
+     * Well, Since {@link SpawnEntityEvent} is a multi entity event, we can
+     * safely assume that a) We allow plugins to control the entities being
+     * loaded from the chunk, b) we can throw this event customarily for
+     * SpongeAPI plugins, and c) for Forge, we can handle this specifically
+     * for each entity in the event during the re-sync between Sponge and Forge.
+     *
+     * Also, since Forge does some bin patching on this method to throw their
+     * own event, I'd rather not cause havock when the patch fails to apply
+     * since the method is overwritten. Note that this is ALWAYS ALWAYS ALWAYS
+     * intending to cancel after throwing our event because then, nothing
+     * else is supposed to happen (otherwise, we have issues of duplicate
+     * entities being loaded into the world, which is a big no-no).
+     *
+     * @param entities The entities being loaded
+     * @param callbackInfo The callback info
+     */
+    @Final
+    @Inject(method = "loadEntities", at = @At("HEAD"), cancellable = true)
+    private void spongeLoadEntities(Collection<net.minecraft.entity.Entity> entities, CallbackInfo callbackInfo) {
+        if (entities.isEmpty()) {
+            // just return, no entities to load!
+            callbackInfo.cancel();
+            return;
+        }
+        List<Entity> entityList = new ArrayList<>();
+        ImmutableList.Builder<EntitySnapshot> snapshotBuilder = ImmutableList.builder();
+        for (net.minecraft.entity.Entity entity : entities) {
+            entityList.add((Entity) entity);
+            snapshotBuilder.add(((Entity) entity).createSnapshot());
+        }
+        SpawnCause cause = SpawnCause.builder().type(SpawnTypes.CHUNK_LOAD).build();
+        List<NamedCause> causes = new ArrayList<>();
+        causes.add(NamedCause.source(cause));
+        causes.add(NamedCause.of("World", this));
+        SpawnEntityEvent.ChunkLoad chunkLoad = SpongeEventFactory.createSpawnEntityEventChunkLoad(Cause.of(causes), entityList,
+                snapshotBuilder.build(), this);
+        SpongeImpl.postEvent(chunkLoad);
+        if (!chunkLoad.isCancelled()) {
+            for (Entity successful : chunkLoad.getEntities()) {
+                this.loadedEntityList.add((net.minecraft.entity.Entity) successful);
+                this.onEntityAdded((net.minecraft.entity.Entity) successful);
+            }
+        }
+        callbackInfo.cancel();
+    }
 }

@@ -32,6 +32,7 @@ import net.minecraft.entity.item.EntityMinecart;
 import net.minecraft.nbt.NBTTagCompound;
 import net.minecraft.nbt.NBTTagList;
 import net.minecraft.world.World;
+import net.minecraft.world.WorldServer;
 import net.minecraft.world.chunk.storage.AnvilChunkLoader;
 import org.spongepowered.api.entity.EntityType;
 import org.spongepowered.api.entity.Transform;
@@ -149,7 +150,7 @@ public class MixinAnvilChunkLoader {
      * @return
      */
     @Redirect(method = "readChunkFromNBT(Lnet/minecraft/world/World;Lnet/minecraft/nbt/NBTTagCompound;)Lnet/minecraft/world/chunk/Chunk;",
-            at = @At(value = "INVOKE", target = ENTITY_LIST_CREATE_FROM_NBT), expect = 0)
+            at = @At(value = "INVOKE", target = ENTITY_LIST_CREATE_FROM_NBT), require = 0, expect = 0)
     private Entity onReadEntity(NBTTagCompound compound, World world) {
         if ("Minecart".equals(compound.getString(NbtDataUtil.ENTITY_TYPE_ID))) {
             compound.setString(NbtDataUtil.ENTITY_TYPE_ID,

@@ -31,10 +31,14 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import net.minecraft.entity.EntityLivingBase;
 import net.minecraft.entity.item.EntityItem;
+import net.minecraft.entity.item.EntityTNTPrimed;
 import net.minecraft.entity.item.EntityXPOrb;
 import net.minecraft.entity.passive.EntityAnimal;
+import net.minecraft.entity.passive.EntityTameable;
 import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.entity.player.EntityPlayerMP;
+import net.minecraft.entity.projectile.EntityFishHook;
+import net.minecraft.entity.projectile.EntityThrowable;
 import net.minecraft.init.Items;
 import net.minecraft.inventory.ContainerPlayer;
 import net.minecraft.inventory.Slot;
@@ -55,10 +59,12 @@ import net.minecraft.util.MovingObjectPosition.MovingObjectType;
 import net.minecraft.world.IInteractionObject;
 import org.spongepowered.api.block.BlockSnapshot;
 import org.spongepowered.api.block.BlockState;
+import org.spongepowered.api.block.tileentity.TileEntity;
 import org.spongepowered.api.data.Transaction;
 import org.spongepowered.api.entity.Entity;
 import org.spongepowered.api.entity.EntitySnapshot;
 import org.spongepowered.api.entity.EntityType;
+import org.spongepowered.api.entity.Item;
 import org.spongepowered.api.entity.Transform;
 import org.spongepowered.api.entity.living.Ageable;
 import org.spongepowered.api.entity.living.Humanoid;
@@ -67,6 +73,7 @@ import org.spongepowered.api.entity.living.player.Player;
 import org.spongepowered.api.entity.living.player.User;
 import org.spongepowered.api.entity.projectile.Projectile;
 import org.spongepowered.api.entity.projectile.source.ProjectileSource;
+import org.spongepowered.api.event.Event;
 import org.spongepowered.api.event.SpongeEventFactory;
 import org.spongepowered.api.event.block.CollideBlockEvent;
 import org.spongepowered.api.event.block.NotifyNeighborBlockEvent;
@@ -688,6 +695,7 @@ public class SpongeCommonEventFactory {
         } else {
             final Optional<Entity> currentTickEntity = ((IMixinWorld) nmsWorld).getCurrentTickEntity();
             final Optional<BlockSnapshot> currentTickBlock = ((IMixinWorld) nmsWorld).getCurrentTickBlock();
+            final Optional<TileEntity> currentTickTileEntity = ((IMixinWorld) nmsWorld).getCurrentTickTileEntity();
             if (nmsEntity instanceof EntityItem) {
                 if (((IMixinWorld) world).capturingTerrainGen()) {
                     return false; // Basically, don't spawn these stupid items.
@@ -698,9 +706,9 @@ public class SpongeCommonEventFactory {
                             .type(SpawnTypes.BLOCK_SPAWNING)
                             .build();
                     list.add(NamedCause.source(blockSpawnCause));
-                } else if (((IMixinWorld) nmsWorld).getCurrentTickTileEntity().isPresent()) {
+                } else if (currentTickTileEntity.isPresent()) {
                     BlockSpawnCause blockSpawnCause = BlockSpawnCause.builder()
-                            .block(((IMixinWorld) nmsWorld).getCurrentTickTileEntity().get().getLocation().createSnapshot())
+                            .block(currentTickTileEntity.get().getLocation().createSnapshot())
                             .type(SpawnTypes.BLOCK_SPAWNING)
                             .build();
                     list.add(NamedCause.source(blockSpawnCause));
@@ -709,13 +717,22 @@ public class SpongeCommonEventFactory {
                         list.add(NamedCause.of(entry.getKey(), entry.getValue()));
                     }
                 } else if (currentTickEntity.isPresent()) {
-                    EntitySpawnCause cause = EntitySpawnCause.builder()
-                            .entity(currentTickEntity.get())
-                            .type(SpawnTypes.PASSIVE)
-                            .build();
-                    list.add(NamedCause.source(cause));
+                    if  (currentTickEntity.get() == entity) {
+                        SpawnCause cause = SpawnCause.builder()
+                                .type(SpawnTypes.CUSTOM)
+                                .build();
+                        list.add(NamedCause.source(cause));
+                    } else {
+                        EntitySpawnCause cause = EntitySpawnCause.builder()
+                                .entity(currentTickEntity.get())
+                                .type(SpawnTypes.PASSIVE)
+                                .build();
+                        list.add(NamedCause.source(cause));
+                    }
                 }
             } else if (nmsEntity instanceof EntityXPOrb) {
+                // This is almost always ALWAYS guaranteed to be experience, otherwise, someone
+                // can open a ticket to correct us with proof otherwise.
                 if (currentTickEntity.isPresent()) {
                     Entity currentEntity = currentTickEntity.get();
                     EntitySpawnCause spawnCause = EntitySpawnCause.builder()
@@ -736,6 +753,12 @@ public class SpongeCommonEventFactory {
                 } else if (currentTickBlock.isPresent()) {
                     BlockSpawnCause spawnCause = BlockSpawnCause.builder()
                             .block(currentTickBlock.get())
+                            .type(SpawnTypes.EXPERIENCE)
+                            .build();
+                    list.add(NamedCause.source(spawnCause));
+                } else if (currentTickTileEntity.isPresent()) {
+                    SpawnCause spawnCause = BlockSpawnCause.builder()
+                            .block(currentTickTileEntity.get().getLocation().createSnapshot())
                             .type(SpawnTypes.EXPERIENCE)
                             .build();
                     list.add(NamedCause.source(spawnCause));
@@ -796,10 +819,67 @@ public class SpongeCommonEventFactory {
         }
         if (list.isEmpty()) {
             System.err.printf("*** Cause list is empty!!! *** \n");
+            list.add(NamedCause.source(SpawnCause.builder().type(SpawnTypes.CUSTOM).build()));
             // Something happened here!
         }
 
         return world.spawnEntity(entity, Cause.of(list));
+    }
+
+    public static Cause handleExtraCustomCauses(net.minecraft.entity.Entity spawning, Cause current) {
+        EntityLivingBase specialCause = null;
+        String causeName = "";
+        // Special case for throwables
+        if (spawning instanceof EntityThrowable) {
+            EntityThrowable throwable = (EntityThrowable) spawning;
+            specialCause = throwable.getThrower();
+
+            if (specialCause != null) {
+                causeName = NamedCause.THROWER;
+                if (specialCause instanceof Player) {
+                    Player player = (Player) specialCause;
+                    ((IMixinEntity) spawning).trackEntityUniqueId(NbtDataUtil.SPONGE_ENTITY_CREATOR, player.getUniqueId());
+                }
+            }
+        }
+        // Special case for TNT
+        else if (spawning instanceof EntityTNTPrimed) {
+            EntityTNTPrimed tntEntity = (EntityTNTPrimed) spawning;
+            specialCause = tntEntity.getTntPlacedBy();
+            causeName = NamedCause.IGNITER;
+
+            if (specialCause instanceof Player) {
+                Player player = (Player) specialCause;
+                ((IMixinEntity) spawning).trackEntityUniqueId(NbtDataUtil.SPONGE_ENTITY_CREATOR, player.getUniqueId());
+            }
+        }
+        // Special case for Tameables
+        else if (spawning instanceof EntityTameable) {
+            EntityTameable tameable = (EntityTameable) spawning;
+            if (tameable.getOwner() != null) {
+                specialCause = tameable.getOwner();
+                causeName = NamedCause.OWNER;
+            }
+        }
+
+        if (specialCause != null && !current.containsNamed(causeName)) {
+            return SpongeCommonEventFactory.withExtra(current, causeName, specialCause);
+        } else {
+            return current;
+        }
+
+    }
+
+    public static Cause withExtra(Cause cause, String name, Object extra) {
+        return cause.with(NamedCause.of(name, extra));
+    }
+
+    public static Event throwItemDropEvent(Cause cause, List<Entity> entities, ImmutableList<EntitySnapshot> snapshots, World world) {
+        return SpongeEventFactory.createDropItemEventCustom(cause, entities, snapshots, world);
+    }
+
+    public static Event throwEntitySpawnCustom(Cause cause, List<Entity> entities, ImmutableList<EntitySnapshot> snapshots, World world) {
+        return SpongeEventFactory.createSpawnEntityEventCustom(cause, entities, snapshots, world);
     }
 
     private static boolean isEntityDead(Entity entity) {
@@ -813,5 +893,26 @@ public class SpongeCommonEventFactory {
         } else {
             return entity.isDead;
         }
+    }
+
+    public static Cause handleDropCause(Cause cause) {
+        final Object root = cause.root();
+        Cause newCause;
+        if (!(root instanceof SpawnCause)) {
+            SpawnCause spawnCause;
+            if (StaticMixinHelper.packetPlayer == null) {
+                spawnCause = SpawnCause.builder().type(SpawnTypes.DROPPED_ITEM).build();
+            } else {
+                spawnCause = EntitySpawnCause.builder()
+                        .entity((Entity) StaticMixinHelper.packetPlayer)
+                        .type(SpawnTypes.DROPPED_ITEM)
+                        .build();
+            }
+            newCause = Cause.of(NamedCause.source(spawnCause));
+            newCause = newCause.merge(cause);
+        } else {
+            newCause = cause;
+        }
+        return newCause;
     }
 }
