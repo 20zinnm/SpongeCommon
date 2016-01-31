@@ -30,6 +30,7 @@ import com.flowpowered.math.vector.Vector3d;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import net.minecraft.entity.item.EntityItem;
+import net.minecraft.entity.item.EntityXPOrb;
 import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.entity.player.EntityPlayerMP;
 import net.minecraft.inventory.ContainerPlayer;
@@ -676,42 +677,68 @@ public class SpongeCommonEventFactory {
                 list.add(NamedCause.source(SpawnCause.builder().type(SpawnTypes.STRUCTURE).build()));
                 list.add(NamedCause.of("Structure", StaticMixinHelper.runningGenerator));
             }
-        } else if (nmsEntity instanceof EntityItem) {
-            if (((IMixinWorld) world).capturingTerrainGen()) {
-                return false; // Basically, don't spawn these stupid items.
-            }
-            if (((IMixinWorld) nmsWorld).getCurrentTickBlock().isPresent()) {
-                BlockSpawnCause blockSpawnCause = BlockSpawnCause.builder()
-                        .block(((IMixinWorld) nmsWorld).getCurrentTickBlock().get())
-                        .type(SpawnTypes.BLOCK_SPAWNING)
-                        .build();
-                list.add(NamedCause.source(blockSpawnCause));
-            } else if (((IMixinWorld) nmsWorld).getCurrentTickTileEntity().isPresent()) {
-                BlockSpawnCause blockSpawnCause = BlockSpawnCause.builder()
-                        .block(((IMixinWorld) nmsWorld).getCurrentTickTileEntity().get().getLocation().createSnapshot())
-                        .type(SpawnTypes.BLOCK_SPAWNING)
-                        .build();
-                list.add(NamedCause.source(blockSpawnCause));
-            } else if (StaticMixinHelper.dropCause != null) {
-                for (Map.Entry<String, Object> entry : StaticMixinHelper.dropCause.getNamedCauses().entrySet()) {
-                    list.add(NamedCause.of(entry.getKey(), entry.getValue()));
+        } else {
+            final Optional<Entity> currentTickEntity = ((IMixinWorld) nmsWorld).getCurrentTickEntity();
+            final Optional<BlockSnapshot> currentTickBlock = ((IMixinWorld) nmsWorld).getCurrentTickBlock();
+            if (nmsEntity instanceof EntityItem) {
+                if (((IMixinWorld) world).capturingTerrainGen()) {
+                    return false; // Basically, don't spawn these stupid items.
                 }
-            } else if (((IMixinWorld) nmsWorld).getCurrentTickEntity().isPresent()) {
-                EntitySpawnCause cause = EntitySpawnCause.builder()
-                        .entity(((IMixinWorld) nmsWorld).getCurrentTickEntity().get())
-                        .type(SpawnTypes.PASSIVE)
-                        .build();
-                list.add(NamedCause.source(cause));
+                if (currentTickBlock.isPresent()) {
+                    BlockSpawnCause blockSpawnCause = BlockSpawnCause.builder()
+                            .block(currentTickBlock.get())
+                            .type(SpawnTypes.BLOCK_SPAWNING)
+                            .build();
+                    list.add(NamedCause.source(blockSpawnCause));
+                } else if (((IMixinWorld) nmsWorld).getCurrentTickTileEntity().isPresent()) {
+                    BlockSpawnCause blockSpawnCause = BlockSpawnCause.builder()
+                            .block(((IMixinWorld) nmsWorld).getCurrentTickTileEntity().get().getLocation().createSnapshot())
+                            .type(SpawnTypes.BLOCK_SPAWNING)
+                            .build();
+                    list.add(NamedCause.source(blockSpawnCause));
+                } else if (StaticMixinHelper.dropCause != null) {
+                    for (Map.Entry<String, Object> entry : StaticMixinHelper.dropCause.getNamedCauses().entrySet()) {
+                        list.add(NamedCause.of(entry.getKey(), entry.getValue()));
+                    }
+                } else if (currentTickEntity.isPresent()) {
+                    EntitySpawnCause cause = EntitySpawnCause.builder()
+                            .entity(currentTickEntity.get())
+                            .type(SpawnTypes.PASSIVE)
+                            .build();
+                    list.add(NamedCause.source(cause));
+                }
+            } else if (nmsEntity instanceof EntityXPOrb) {
+                if (currentTickEntity.isPresent()) {
+                    Entity currentEntity = currentTickEntity.get();
+                    if (((net.minecraft.entity.Entity) currentEntity).isDead) {
+                        EntitySpawnCause spawnCause = EntitySpawnCause.builder()
+                                .entity(currentEntity)
+                                .type(SpawnTypes.EXPERIENCE)
+                                .build();
+                        list.add(NamedCause.source(spawnCause));
+                    }
+                } else if (currentTickBlock.isPresent()) {
+                    BlockSpawnCause spawnCause = BlockSpawnCause.builder()
+                            .block(currentTickBlock.get())
+                            .type(SpawnTypes.EXPERIENCE)
+                            .build();
+                    list.add(NamedCause.source(spawnCause));
+                } else {
+                    SpawnCause spawnCause = SpawnCause.builder()
+                            .type(SpawnTypes.EXPERIENCE)
+                            .build();
+                    list.add(NamedCause.source(spawnCause));
+                }
             }
-        }
 
-        else {
-            EntityType entityType = entity.getType();
-            String id = entityType.getId();
-            if (id.contains("aura") || id.contains("portallesser") || id.contains("eldritchguardian")) {
-                list.add(NamedCause.source(SpawnCause.builder().type(SpawnTypes.CUSTOM).build()));
-            } else {
-                list.add(NamedCause.source(SpawnCause.builder().type(SpawnTypes.CUSTOM).build()));
+            else {
+                EntityType entityType = entity.getType();
+                String id = entityType.getId();
+                if (id.contains("aura") || id.contains("portallesser") || id.contains("eldritchguardian")) {
+                    list.add(NamedCause.source(SpawnCause.builder().type(SpawnTypes.CUSTOM).build()));
+                } else {
+                    list.add(NamedCause.source(SpawnCause.builder().type(SpawnTypes.CUSTOM).build()));
+                }
             }
         }
         if (list.isEmpty()) {
