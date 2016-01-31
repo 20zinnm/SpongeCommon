@@ -29,6 +29,7 @@ import com.google.common.collect.Maps;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockEventData;
 import net.minecraft.block.state.IBlockState;
+import net.minecraft.entity.EnumCreatureType;
 import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.util.BlockPos;
 import net.minecraft.world.IBlockAccess;
@@ -36,6 +37,7 @@ import net.minecraft.world.NextTickListEntry;
 import net.minecraft.world.World;
 import net.minecraft.world.WorldServer;
 import net.minecraft.world.WorldSettings;
+import net.minecraft.world.biome.BiomeGenBase;
 import org.spongepowered.api.block.ScheduledBlockUpdate;
 import org.spongepowered.api.entity.living.player.Player;
 import org.spongepowered.api.entity.living.player.User;
@@ -294,5 +296,10 @@ public abstract class MixinWorldServer extends MixinWorld {
         // this redirect forces it to return false if a player is sleep-ignored even if they're a spectator
         boolean ignore = entityPlayer instanceof Player && ((Player)entityPlayer).isSleepingIgnored();
         return !ignore && entityPlayer.isSpectator();
+    }
+
+    @Inject(method = "getSpawnListEntryForTypeAt", at = @At("HEAD"))
+    private void onGetSpawnList(EnumCreatureType creatureType, BlockPos pos, CallbackInfoReturnable<BiomeGenBase.SpawnListEntry> callbackInfo) {
+        StaticMixinHelper.gettingSpawnList = true;
     }
 }

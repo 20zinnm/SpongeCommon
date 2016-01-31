@@ -24,10 +24,13 @@
  */
 package org.spongepowered.common.event;
 
+import static com.google.common.base.Preconditions.checkArgument;
+
 import com.flowpowered.math.vector.Vector3d;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
-import net.minecraft.entity.passive.EntityHorse;
+import net.minecraft.entity.item.EntityItem;
+import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.entity.player.EntityPlayerMP;
 import net.minecraft.inventory.ContainerPlayer;
 import net.minecraft.inventory.Slot;
@@ -50,6 +53,7 @@ import org.spongepowered.api.block.BlockState;
 import org.spongepowered.api.data.Transaction;
 import org.spongepowered.api.entity.Entity;
 import org.spongepowered.api.entity.EntitySnapshot;
+import org.spongepowered.api.entity.EntityType;
 import org.spongepowered.api.entity.Transform;
 import org.spongepowered.api.entity.living.Humanoid;
 import org.spongepowered.api.entity.living.Living;
@@ -61,6 +65,10 @@ import org.spongepowered.api.event.block.CollideBlockEvent;
 import org.spongepowered.api.event.block.NotifyNeighborBlockEvent;
 import org.spongepowered.api.event.cause.Cause;
 import org.spongepowered.api.event.cause.NamedCause;
+import org.spongepowered.api.event.cause.entity.spawn.BlockSpawnCause;
+import org.spongepowered.api.event.cause.entity.spawn.EntitySpawnCause;
+import org.spongepowered.api.event.cause.entity.spawn.SpawnCause;
+import org.spongepowered.api.event.cause.entity.spawn.SpawnTypes;
 import org.spongepowered.api.event.entity.CollideEntityEvent;
 import org.spongepowered.api.event.entity.DisplaceEntityEvent;
 import org.spongepowered.api.event.item.inventory.ChangeInventoryEvent;
@@ -73,6 +81,7 @@ import org.spongepowered.api.item.inventory.transaction.SlotTransaction;
 import org.spongepowered.api.util.Direction;
 import org.spongepowered.api.world.Location;
 import org.spongepowered.api.world.World;
+import org.spongepowered.api.world.gen.PopulatorType;
 import org.spongepowered.common.SpongeImpl;
 import org.spongepowered.common.data.util.NbtDataUtil;
 import org.spongepowered.common.interfaces.IMixinChunk;
@@ -83,6 +92,7 @@ import org.spongepowered.common.item.inventory.adapter.impl.slots.SlotAdapter;
 import org.spongepowered.common.registry.provider.DirectionFacingProvider;
 import org.spongepowered.common.util.StaticMixinHelper;
 import org.spongepowered.common.util.VecHelper;
+import org.spongepowered.common.world.gen.InternalPopulatorTypes;
 
 import java.util.ArrayList;
 import java.util.EnumSet;
@@ -637,5 +647,78 @@ public class SpongeCommonEventFactory {
                 //((Entity) entity).setTransform(event.getToTransform());
             }
         }
+    }
+
+    public static void checkSpawnEvent(Entity entity, Cause cause) {
+        final Optional<SpawnCause> spawnCause = cause.first(SpawnCause.class);
+        checkArgument(cause.root() instanceof SpawnCause, "The cause does not have a SpawnCause! It has instead: {}", cause.root().toString());
+        checkArgument(cause.containsNamed(NamedCause.SOURCE), "The cause does not have a \"Source\" named object!");
+        checkArgument(cause.get(NamedCause.SOURCE, SpawnCause.class).isPresent(), "The SpawnCause is not the \"Source\" of the cause!");
+
+    }
+
+    public static boolean handleVanillaSpawnEntity(net.minecraft.world.World nmsWorld, net.minecraft.entity.Entity nmsEntity) {
+        World world = (World) nmsWorld;
+        Entity entity = (Entity) nmsEntity;
+        List<NamedCause> list = new ArrayList<>();
+        if (nmsWorld.isRemote) { // Because the client is stupid
+            return world.spawnEntity(entity, Cause.of(NamedCause.source(SpawnCause.builder().type(SpawnTypes.CUSTOM).build())));
+        }
+        if (nmsEntity instanceof EntityPlayer) {
+            return world.spawnEntity(entity, Cause.of(NamedCause.source(SpawnCause.builder().type(SpawnTypes.CUSTOM).build())));
+        }
+        if (StaticMixinHelper.runningGenerator != null) {
+            PopulatorType type = StaticMixinHelper.runningGenerator;
+            if (InternalPopulatorTypes.ANIMAL.equals(type)) {
+                list.add(NamedCause.source(SpawnCause.builder().type(SpawnTypes.WORLD_SPAWNER).build()));
+                list.add(NamedCause.of("AnimalSpawner", StaticMixinHelper.runningGenerator));
+            } else {
+                list.add(NamedCause.source(SpawnCause.builder().type(SpawnTypes.STRUCTURE).build()));
+                list.add(NamedCause.of("Structure", StaticMixinHelper.runningGenerator));
+            }
+        } else if (nmsEntity instanceof EntityItem) {
+            if (((IMixinWorld) world).capturingTerrainGen()) {
+                return false; // Basically, don't spawn these stupid items.
+            }
+            if (((IMixinWorld) nmsWorld).getCurrentTickBlock().isPresent()) {
+                BlockSpawnCause blockSpawnCause = BlockSpawnCause.builder()
+                        .block(((IMixinWorld) nmsWorld).getCurrentTickBlock().get())
+                        .type(SpawnTypes.BLOCK_SPAWNING)
+                        .build();
+                list.add(NamedCause.source(blockSpawnCause));
+            } else if (((IMixinWorld) nmsWorld).getCurrentTickTileEntity().isPresent()) {
+                BlockSpawnCause blockSpawnCause = BlockSpawnCause.builder()
+                        .block(((IMixinWorld) nmsWorld).getCurrentTickTileEntity().get().getLocation().createSnapshot())
+                        .type(SpawnTypes.BLOCK_SPAWNING)
+                        .build();
+                list.add(NamedCause.source(blockSpawnCause));
+            } else if (StaticMixinHelper.dropCause != null) {
+                for (Map.Entry<String, Object> entry : StaticMixinHelper.dropCause.getNamedCauses().entrySet()) {
+                    list.add(NamedCause.of(entry.getKey(), entry.getValue()));
+                }
+            } else if (((IMixinWorld) nmsWorld).getCurrentTickEntity().isPresent()) {
+                EntitySpawnCause cause = EntitySpawnCause.builder()
+                        .entity(((IMixinWorld) nmsWorld).getCurrentTickEntity().get())
+                        .type(SpawnTypes.PASSIVE)
+                        .build();
+                list.add(NamedCause.source(cause));
+            }
+        }
+
+        else {
+            EntityType entityType = entity.getType();
+            String id = entityType.getId();
+            if (id.contains("aura") || id.contains("portallesser") || id.contains("eldritchguardian")) {
+                list.add(NamedCause.source(SpawnCause.builder().type(SpawnTypes.CUSTOM).build()));
+            } else {
+                list.add(NamedCause.source(SpawnCause.builder().type(SpawnTypes.CUSTOM).build()));
+            }
+        }
+        if (list.isEmpty()) {
+            System.err.printf("*** Cause list is empty!!! *** \n");
+            // Something happened here!
+        }
+
+        return world.spawnEntity(entity, Cause.of(list));
     }
 }

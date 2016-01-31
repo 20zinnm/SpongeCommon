@@ -135,6 +135,8 @@ import org.spongepowered.api.event.block.ChangeBlockEvent;
 import org.spongepowered.api.event.block.NotifyNeighborBlockEvent;
 import org.spongepowered.api.event.cause.Cause;
 import org.spongepowered.api.event.cause.NamedCause;
+import org.spongepowered.api.event.cause.entity.spawn.SpawnCause;
+import org.spongepowered.api.event.cause.entity.spawn.SpawnTypes;
 import org.spongepowered.api.event.entity.DestructEntityEvent;
 import org.spongepowered.api.event.entity.SpawnEntityEvent;
 import org.spongepowered.api.event.item.inventory.DropItemEvent;
@@ -260,8 +262,8 @@ public abstract class MixinWorld implements World, IMixinWorld {
     public boolean restoringBlocks = false;
     public List<Entity> capturedEntities = new ArrayList<>();
     public List<Entity> capturedEntityItems = new ArrayList<>();
-    public BlockSnapshot currentTickBlock = null;
-    public Entity currentTickEntity = null;
+    @Nullable public BlockSnapshot currentTickBlock = null;
+    @Nullable public Entity currentTickEntity = null;
     public TileEntity currentTickTileEntity = null;
     public SpongeBlockSnapshotBuilder builder = new SpongeBlockSnapshotBuilder();
     public List<BlockSnapshot> capturedSpongeBlockSnapshots = new ArrayList<>();
@@ -559,7 +561,7 @@ public abstract class MixinWorld implements World, IMixinWorld {
      */
     @Overwrite
     public boolean spawnEntityInWorld(net.minecraft.entity.Entity entity) {
-        return spawnEntity((Entity) entity, Cause.of(NamedCause.source(this)));
+        return SpongeCommonEventFactory.handleVanillaSpawnEntity(this.nmsWorld, entity);
     }
 
     @Override
@@ -568,6 +570,7 @@ public abstract class MixinWorld implements World, IMixinWorld {
         checkNotNull(entity, "Entity cannot be null!");
         checkNotNull(cause, "Cause cannot be null!");
 
+        SpongeCommonEventFactory.checkSpawnEvent(entity, cause);
         // Very first thing - fire events that are from entity construction
         if (((IMixinEntity) entity).isInConstructPhase()) {
             ((IMixinEntity) entity).firePostConstructEvents();
@@ -606,7 +609,7 @@ public abstract class MixinWorld implements World, IMixinWorld {
                 return true;
             }
 
-            if (!flag && this.processingCaptureCause) {
+            if (this.processingCaptureCause) {
                 if (this.currentTickBlock != null) {
                     BlockPos sourcePos = VecHelper.toBlockPos(this.currentTickBlock.getPosition());
                     Block targetBlock = getBlockState(entityIn.getPosition()).getBlock();
@@ -637,7 +640,7 @@ public abstract class MixinWorld implements World, IMixinWorld {
                 EntityLivingBase specialCause = null;
                 String causeName = "";
                 // Special case for throwables
-                if (!(entityIn instanceof EntityPlayer) && entityIn instanceof EntityThrowable) {
+                if (entityIn instanceof EntityThrowable) {
                     EntityThrowable throwable = (EntityThrowable) entityIn;
                     specialCause = throwable.getThrower();
 
@@ -650,7 +653,7 @@ public abstract class MixinWorld implements World, IMixinWorld {
                     }
                 }
                 // Special case for TNT
-                else if (!(entityIn instanceof EntityPlayer) && entityIn instanceof EntityTNTPrimed) {
+                else if (entityIn instanceof EntityTNTPrimed) {
                     EntityTNTPrimed tntEntity = (EntityTNTPrimed) entityIn;
                     specialCause = tntEntity.getTntPlacedBy();
                     causeName = NamedCause.IGNITER;
@@ -661,7 +664,7 @@ public abstract class MixinWorld implements World, IMixinWorld {
                     }
                 }
                 // Special case for Tameables
-                else if (!(entityIn instanceof EntityPlayer) && entityIn instanceof EntityTameable) {
+                else if (entityIn instanceof EntityTameable) {
                     EntityTameable tameable = (EntityTameable) entityIn;
                     if (tameable.getOwner() != null) {
                         specialCause = tameable.getOwner();
@@ -673,20 +676,18 @@ public abstract class MixinWorld implements World, IMixinWorld {
                     cause = cause.with(NamedCause.of(causeName, specialCause));
                 }
 
-                org.spongepowered.api.event.Event event = null;
+                org.spongepowered.api.event.Event event;
                 ImmutableList.Builder<EntitySnapshot> entitySnapshotBuilder = new ImmutableList.Builder<>();
                 entitySnapshotBuilder.add(((Entity) entityIn).createSnapshot());
 
                 if (entityIn instanceof EntityItem) {
-                    this.capturedEntityItems.add((Item) entityIn);
-                    event =
-                            SpongeEventFactory.createDropItemEventCustom(cause, (List<Entity>) (List<?>) this.capturedEntityItems,
-                                    entitySnapshotBuilder.build(), (World) (Object) this);
+                    this.capturedEntityItems.add((Item) (Object) entityIn);
+                    event = SpongeEventFactory.createDropItemEventCustom(cause, this.capturedEntityItems,
+                                                                         entitySnapshotBuilder.build(), this);
                 } else {
                     this.capturedEntities.add((Entity) entityIn);
-                    event =
-                            SpongeEventFactory.createSpawnEntityEventCustom(cause, this.capturedEntities,
-                                    entitySnapshotBuilder.build(), (World) (Object) this);
+                    event = SpongeEventFactory.createSpawnEntityEventCustom(cause, this.capturedEntities,
+                                                                            entitySnapshotBuilder.build(), this);
                 }
                 if (!SpongeImpl.postEvent(event) && !entity.isRemoved()) {
                     if (entityIn instanceof EntityWeatherEffect) {
@@ -697,9 +698,9 @@ public abstract class MixinWorld implements World, IMixinWorld {
                     this.loadedEntityList.add(entityIn);
                     this.onEntityAdded(entityIn);
                     if (entityIn instanceof EntityItem) {
-                        this.capturedEntityItems.remove(entityIn);
+                        this.capturedEntityItems.remove((Entity) entityIn);
                     } else {
-                        this.capturedEntities.remove(entityIn);
+                        this.capturedEntities.remove((Entity) entityIn);
                     }
                     return true;
                 }
