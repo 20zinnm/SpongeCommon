@@ -176,6 +176,7 @@
         "command.MixinSubject",
         "command.MixinPlayerSelector",
         "command.MixinPlayerSelectorScore",
+        "command.server.MixinCommandSummon",
         "entity.MixinArmorEquipable",
         "entity.MixinEntity",
         "entity.MixinEntityAgeable",

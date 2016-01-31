@@ -29,10 +29,13 @@ import static com.google.common.base.Preconditions.checkArgument;
 import com.flowpowered.math.vector.Vector3d;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+import net.minecraft.entity.EntityLivingBase;
 import net.minecraft.entity.item.EntityItem;
 import net.minecraft.entity.item.EntityXPOrb;
+import net.minecraft.entity.passive.EntityAnimal;
 import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.entity.player.EntityPlayerMP;
+import net.minecraft.init.Items;
 import net.minecraft.inventory.ContainerPlayer;
 import net.minecraft.inventory.Slot;
 import net.minecraft.item.ItemStack;
@@ -45,6 +48,7 @@ import net.minecraft.network.play.server.S09PacketHeldItemChange;
 import net.minecraft.network.play.server.S2DPacketOpenWindow;
 import net.minecraft.network.play.server.S2FPacketSetSlot;
 import net.minecraft.util.BlockPos;
+import net.minecraft.util.CombatEntry;
 import net.minecraft.util.EnumFacing;
 import net.minecraft.util.MovingObjectPosition;
 import net.minecraft.util.MovingObjectPosition.MovingObjectType;
@@ -56,10 +60,12 @@ import org.spongepowered.api.entity.Entity;
 import org.spongepowered.api.entity.EntitySnapshot;
 import org.spongepowered.api.entity.EntityType;
 import org.spongepowered.api.entity.Transform;
+import org.spongepowered.api.entity.living.Ageable;
 import org.spongepowered.api.entity.living.Humanoid;
 import org.spongepowered.api.entity.living.Living;
 import org.spongepowered.api.entity.living.player.Player;
 import org.spongepowered.api.entity.living.player.User;
+import org.spongepowered.api.entity.projectile.Projectile;
 import org.spongepowered.api.entity.projectile.source.ProjectileSource;
 import org.spongepowered.api.event.SpongeEventFactory;
 import org.spongepowered.api.event.block.CollideBlockEvent;
@@ -67,6 +73,7 @@ import org.spongepowered.api.event.block.NotifyNeighborBlockEvent;
 import org.spongepowered.api.event.cause.Cause;
 import org.spongepowered.api.event.cause.NamedCause;
 import org.spongepowered.api.event.cause.entity.spawn.BlockSpawnCause;
+import org.spongepowered.api.event.cause.entity.spawn.BreedingSpawnCause;
 import org.spongepowered.api.event.cause.entity.spawn.EntitySpawnCause;
 import org.spongepowered.api.event.cause.entity.spawn.SpawnCause;
 import org.spongepowered.api.event.cause.entity.spawn.SpawnTypes;
@@ -90,6 +97,7 @@ import org.spongepowered.common.interfaces.IMixinContainer;
 import org.spongepowered.common.interfaces.entity.IMixinEntity;
 import org.spongepowered.common.interfaces.world.IMixinWorld;
 import org.spongepowered.common.item.inventory.adapter.impl.slots.SlotAdapter;
+import org.spongepowered.common.item.inventory.util.ItemStackUtil;
 import org.spongepowered.common.registry.provider.DirectionFacingProvider;
 import org.spongepowered.common.util.StaticMixinHelper;
 import org.spongepowered.common.util.VecHelper;
@@ -710,12 +718,20 @@ public class SpongeCommonEventFactory {
             } else if (nmsEntity instanceof EntityXPOrb) {
                 if (currentTickEntity.isPresent()) {
                     Entity currentEntity = currentTickEntity.get();
-                    if (((net.minecraft.entity.Entity) currentEntity).isDead) {
-                        EntitySpawnCause spawnCause = EntitySpawnCause.builder()
-                                .entity(currentEntity)
-                                .type(SpawnTypes.EXPERIENCE)
-                                .build();
-                        list.add(NamedCause.source(spawnCause));
+                    EntitySpawnCause spawnCause = EntitySpawnCause.builder()
+                            .entity(currentEntity)
+                            .type(SpawnTypes.EXPERIENCE)
+                            .build();
+                    list.add(NamedCause.source(spawnCause));
+                    if (isEntityDead(currentEntity)) {
+                        if (currentEntity instanceof EntityLivingBase) {
+                            CombatEntry entry = ((EntityLivingBase) currentEntity).getCombatTracker().func_94544_f();
+                            if (entry != null) {
+                                if (entry.damageSrc != null) {
+                                    list.add(NamedCause.of("LastDamageSource", entry.damageSrc));
+                                }
+                            }
+                        }
                     }
                 } else if (currentTickBlock.isPresent()) {
                     BlockSpawnCause spawnCause = BlockSpawnCause.builder()
@@ -729,12 +745,49 @@ public class SpongeCommonEventFactory {
                             .build();
                     list.add(NamedCause.source(spawnCause));
                 }
-            }
-
-            else {
+            } else if (StaticMixinHelper.prePacketProcessItem != null) {
+                SpawnCause cause;
+                if (entity instanceof Projectile) {
+                    cause = EntitySpawnCause.builder()
+                            .entity(((Entity) StaticMixinHelper.packetPlayer))
+                            .type(SpawnTypes.PROJECTILE)
+                            .build();
+                } else if (StaticMixinHelper.prePacketProcessItem.getItem() == Items.spawn_egg) {
+                    cause = EntitySpawnCause.builder()
+                            .entity((Entity) StaticMixinHelper.packetPlayer)
+                            .type(SpawnTypes.SPAWN_EGG)
+                            .build();
+                } else {
+                    cause = EntitySpawnCause.builder()
+                            .entity((Entity) StaticMixinHelper.packetPlayer)
+                            .type(SpawnTypes.PLACEMENT)
+                            .build();
+                }
+                list.add(NamedCause.source(cause));
+                list.add(NamedCause.of("UsedItem", ItemStackUtil.fromNative(StaticMixinHelper.prePacketProcessItem).createSnapshot()));
+                list.add(NamedCause.owner(StaticMixinHelper.packetPlayer));
+            } else if (currentTickBlock.isPresent()) { // We've exhausted our possibilities, now we just associate blindly
+                BlockSpawnCause cause = BlockSpawnCause.builder().block(currentTickBlock.get())
+                        .type(SpawnTypes.BLOCK_SPAWNING)
+                        .build();
+                list.add(NamedCause.source(cause));
+            } else if (currentTickEntity.isPresent()) {
+                Entity tickingEntity = currentTickEntity.get();
+                if (tickingEntity instanceof Ageable && tickingEntity.getClass() == entity.getClass()) { // We should assume breeding
+                    EntitySpawnCause spawnCause = EntitySpawnCause.builder().entity(tickingEntity).type(SpawnTypes.BREEDING).build();
+                    list.add(NamedCause.source(spawnCause));
+                    if (tickingEntity instanceof EntityAnimal) {
+                        if (((EntityAnimal) tickingEntity).getPlayerInLove() != null) {
+                            list.add(NamedCause.of("Player", ((EntityAnimal) tickingEntity).getPlayerInLove()));
+                        }
+                    }
+                }
+                EntitySpawnCause cause = EntitySpawnCause.builder().entity(currentTickEntity.get()).type(SpawnTypes.CUSTOM).build();
+                list.add(NamedCause.source(cause));
+            } else {
                 EntityType entityType = entity.getType();
                 String id = entityType.getId();
-                if (id.contains("aura") || id.contains("portallesser") || id.contains("eldritchguardian")) {
+                if (id.contains("aura") || id.contains("portallesser") || id.contains("eldritchguardian") || id.contains("thaumslime")) {
                     list.add(NamedCause.source(SpawnCause.builder().type(SpawnTypes.CUSTOM).build()));
                 } else {
                     list.add(NamedCause.source(SpawnCause.builder().type(SpawnTypes.CUSTOM).build()));
@@ -747,5 +800,18 @@ public class SpongeCommonEventFactory {
         }
 
         return world.spawnEntity(entity, Cause.of(list));
+    }
+
+    private static boolean isEntityDead(Entity entity) {
+        return isEntityDead((net.minecraft.entity.Entity) entity);
+    }
+
+    private static boolean isEntityDead(net.minecraft.entity.Entity entity) {
+        if (entity instanceof EntityLivingBase) {
+            EntityLivingBase base = (EntityLivingBase) entity;
+            return base.getHealth() <= 0 || base.deathTime > 0 || base.dead;
+        } else {
+            return entity.isDead;
+        }
     }
 }
