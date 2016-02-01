@@ -683,6 +683,9 @@ public class SpongeCommonEventFactory {
         if (nmsEntity instanceof EntityPlayer) {
             return world.spawnEntity(entity, Cause.of(NamedCause.source(SpawnCause.builder().type(SpawnTypes.CUSTOM).build())));
         }
+        if (((IMixinWorld) nmsWorld).isWorldSpawnerRunning()) {
+            return world.spawnEntity(entity, Cause.of(NamedCause.source(SpawnCause.builder().type(SpawnTypes.CUSTOM).build())));
+        }
         if (StaticMixinHelper.runningGenerator != null) {
             PopulatorType type = StaticMixinHelper.runningGenerator;
             if (InternalPopulatorTypes.ANIMAL.equals(type)) {
@@ -696,9 +699,38 @@ public class SpongeCommonEventFactory {
             final Optional<Entity> currentTickEntity = ((IMixinWorld) nmsWorld).getCurrentTickEntity();
             final Optional<BlockSnapshot> currentTickBlock = ((IMixinWorld) nmsWorld).getCurrentTickBlock();
             final Optional<TileEntity> currentTickTileEntity = ((IMixinWorld) nmsWorld).getCurrentTickTileEntity();
-            if (nmsEntity instanceof EntityItem) {
+            if (StaticMixinHelper.dispenserDispensing) {
+                if (currentTickBlock.isPresent()) {
+                    BlockSpawnCause blockSpawnCause = BlockSpawnCause.builder()
+                            .block(currentTickBlock.get())
+                            .type(SpawnTypes.DISPENSE)
+                            .build();
+                    list.add(NamedCause.source(blockSpawnCause));
+                } else if (currentTickTileEntity.isPresent()) {
+                    BlockSpawnCause blockSpawnCause = BlockSpawnCause.builder()
+                            .block(currentTickTileEntity.get().getLocation().createSnapshot())
+                            .type(SpawnTypes.DISPENSE)
+                            .build();
+                    list.add(NamedCause.source(blockSpawnCause));
+                } else if (currentTickEntity.isPresent()) {
+                    if  (currentTickEntity.get() == entity) {
+                        SpawnCause cause = SpawnCause.builder()
+                                .type(SpawnTypes.DISPENSE)
+                                .build();
+                        list.add(NamedCause.source(cause));
+                    } else {
+                        EntitySpawnCause cause = EntitySpawnCause.builder()
+                                .entity(currentTickEntity.get())
+                                .type(SpawnTypes.DISPENSE)
+                                .build();
+                        list.add(NamedCause.source(cause));
+                    }
+                }
+            } else if (nmsEntity instanceof EntityItem) {
                 if (((IMixinWorld) world).capturingTerrainGen()) {
-                    return false; // Basically, don't spawn these stupid items.
+                    // Just default to the structures placing it.
+                    list.add(NamedCause.source(SpawnCause.builder().type(SpawnTypes.STRUCTURE).build()));
+                    return world.spawnEntity(entity, Cause.of(list));
                 }
                 if (currentTickBlock.isPresent()) {
                     BlockSpawnCause blockSpawnCause = BlockSpawnCause.builder()
@@ -770,7 +802,7 @@ public class SpongeCommonEventFactory {
                 }
             } else if (StaticMixinHelper.prePacketProcessItem != null) {
                 SpawnCause cause;
-                if (entity instanceof Projectile) {
+                if (entity instanceof Projectile || entity instanceof EntityThrowable) {
                     cause = EntitySpawnCause.builder()
                             .entity(((Entity) StaticMixinHelper.packetPlayer))
                             .type(SpawnTypes.PROJECTILE)
@@ -808,21 +840,12 @@ public class SpongeCommonEventFactory {
                 EntitySpawnCause cause = EntitySpawnCause.builder().entity(currentTickEntity.get()).type(SpawnTypes.CUSTOM).build();
                 list.add(NamedCause.source(cause));
             } else {
-                EntityType entityType = entity.getType();
-                String id = entityType.getId();
-                if (id.contains("aura") || id.contains("portallesser") || id.contains("eldritchguardian") || id.contains("thaumslime")) {
-                    list.add(NamedCause.source(SpawnCause.builder().type(SpawnTypes.CUSTOM).build()));
-                } else {
-                    list.add(NamedCause.source(SpawnCause.builder().type(SpawnTypes.CUSTOM).build()));
-                }
+                list.add(NamedCause.source(SpawnCause.builder().type(SpawnTypes.CUSTOM).build()));
             }
         }
         if (list.isEmpty()) {
-            System.err.printf("*** Cause list is empty!!! *** \n");
             list.add(NamedCause.source(SpawnCause.builder().type(SpawnTypes.CUSTOM).build()));
-            // Something happened here!
         }
-
         return world.spawnEntity(entity, Cause.of(list));
     }
 
@@ -895,6 +918,28 @@ public class SpongeCommonEventFactory {
         }
     }
 
+    public static Cause handleEntityCreatedByPlayerCause(Cause cause) {
+        final Object root = cause.root();
+        Cause newCause;
+        if (!(root instanceof SpawnCause)) {
+            SpawnCause spawnCause;
+            if (StaticMixinHelper.packetPlayer == null) {
+                spawnCause = SpawnCause.builder().type(SpawnTypes.PLACEMENT).build();
+            } else {
+                spawnCause = EntitySpawnCause.builder()
+                        .entity((Entity) StaticMixinHelper.packetPlayer)
+                        .type(SpawnTypes.PLACEMENT)
+                        .build();
+            }
+            List<NamedCause> causes = new ArrayList<>();
+            causes.add(NamedCause.source(spawnCause));
+            newCause = moveNewCausesUp(cause, causes);
+        } else {
+            newCause = cause;
+        }
+        return newCause;
+    }
+
     public static Cause handleDropCause(Cause cause) {
         final Object root = cause.root();
         Cause newCause;
@@ -908,11 +953,29 @@ public class SpongeCommonEventFactory {
                         .type(SpawnTypes.DROPPED_ITEM)
                         .build();
             }
-            newCause = Cause.of(NamedCause.source(spawnCause));
-            newCause = newCause.merge(cause);
+            List<NamedCause> causes = new ArrayList<>();
+            causes.add(NamedCause.source(spawnCause));
+            newCause = moveNewCausesUp(cause, causes);
         } else {
             newCause = cause;
         }
         return newCause;
+    }
+
+    private static Cause moveNewCausesUp(Cause currentCause, List<NamedCause> newCauses) {
+        int index = 0;
+        for (Map.Entry<String, Object> entry : currentCause.getNamedCauses().entrySet()) {
+            String entryName = entry.getKey();
+            if ("Source".equals(entryName)) {
+                newCauses.add(NamedCause.of("AdditionalSource", entry.getValue()));
+            } else if ("AdditionalSource".equals(entryName)) {
+                newCauses.add(NamedCause.of("PreviousSource", entry.getValue()));
+            } else if (entryName.startsWith("PreviousSource")) {
+                newCauses.add(NamedCause.of(entryName + index++, entry.getValue()));
+            } else {
+                newCauses.add(NamedCause.of(entryName, entry.getValue()));
+            }
+        }
+        return Cause.of(newCauses);
     }
 }

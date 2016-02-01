@@ -997,6 +997,7 @@ public abstract class MixinWorld implements World, IMixinWorld {
             handleDroppedItems(cause);
         }
         if (this.capturedEntities.size() > 0) {
+            cause = SpongeCommonEventFactory.handleEntityCreatedByPlayerCause(cause);
             handleEntitySpawns(cause);
         }
 
@@ -1088,6 +1089,7 @@ public abstract class MixinWorld implements World, IMixinWorld {
         DropItemEvent event = null;
 
         if (StaticMixinHelper.destructItemDrop) {
+            cause = SpongeCommonEventFactory.handleDropCause(cause);
             event = SpongeEventFactory.createDropItemEventDestruct(cause, this.capturedEntityItems, entitySnapshots, (World) this);
         } else {
             event = SpongeEventFactory.createDropItemEventDispense(cause, this.capturedEntityItems, entitySnapshots, (World) this);

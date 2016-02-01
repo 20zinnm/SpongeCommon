@@ -80,4 +80,5 @@ public class StaticMixinHelper {
     // For spawning
     public static boolean gettingSpawnList;
     public static boolean structureSpawning;
+    public static boolean dispenserDispensing;
 }
