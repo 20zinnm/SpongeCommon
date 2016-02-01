@@ -106,6 +106,7 @@ import org.spongepowered.common.interfaces.world.IMixinWorld;
 import org.spongepowered.common.item.inventory.adapter.impl.slots.SlotAdapter;
 import org.spongepowered.common.item.inventory.util.ItemStackUtil;
 import org.spongepowered.common.registry.provider.DirectionFacingProvider;
+import org.spongepowered.common.registry.type.event.InternalSpawnTypes;
 import org.spongepowered.common.util.StaticMixinHelper;
 import org.spongepowered.common.util.VecHelper;
 import org.spongepowered.common.world.gen.InternalPopulatorTypes;
@@ -117,6 +118,8 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+
+import javax.annotation.Nullable;
 
 public class SpongeCommonEventFactory {
 
@@ -491,7 +494,7 @@ public class SpongeCommonEventFactory {
     }
 
     @SuppressWarnings("unchecked")
-    public static CollideEntityEvent callCollideEntityEvent(net.minecraft.world.World world, net.minecraft.entity.Entity sourceEntity,
+    public static CollideEntityEvent callCollideEntityEvent(net.minecraft.world.World world, @Nullable net.minecraft.entity.Entity sourceEntity,
                                                             List<net.minecraft.entity.Entity> entities) {
         Cause cause = null;
         if (sourceEntity != null) {
@@ -511,10 +514,9 @@ public class SpongeCommonEventFactory {
             }
         }
 
-        ImmutableList<Entity> originalEntities =
-                ImmutableList.copyOf((List<Entity>) (List<?>) entities);
-        CollideEntityEvent event = SpongeEventFactory.createCollideEntityEvent(cause, originalEntities,
-                (List<Entity>) (List<?>) entities, (World) world);
+        ImmutableList<Entity> originalEntities = ImmutableList.copyOf((List<Entity>) (List<?>) entities);
+        CollideEntityEvent event = SpongeEventFactory.createCollideEntityEvent(cause, originalEntities, (List<Entity>) (List<?>) entities,
+                (World) world);
         SpongeImpl.postEvent(event);
         return event;
     }
@@ -522,17 +524,15 @@ public class SpongeCommonEventFactory {
     @SuppressWarnings("rawtypes")
     public static NotifyNeighborBlockEvent callNotifyNeighborEvent(World world, BlockPos pos, EnumSet notifiedSides) {
         BlockSnapshot snapshot = world.createSnapshot(VecHelper.toVector(pos));
-        Map<Direction, BlockState> neighbors = new HashMap<Direction, BlockState>();
+        Map<Direction, BlockState> neighbors = new HashMap<>();
 
-        if (notifiedSides != null) {
-            for (Object obj : notifiedSides) {
-                EnumFacing notifiedSide = (EnumFacing) obj;
-                BlockPos offset = pos.offset(notifiedSide);
-                Direction direction = DirectionFacingProvider.getInstance().getKey(notifiedSide).get();
-                Location<World> location = new Location<World>((World) world, VecHelper.toVector(offset));
-                if (location.getBlockY() >= 0 && location.getBlockY() <= 255) {
-                    neighbors.put(direction, location.getBlock());
-                }
+        for (Object obj : notifiedSides) {
+            EnumFacing notifiedSide = (EnumFacing) obj;
+            BlockPos offset = pos.offset(notifiedSide);
+            Direction direction = DirectionFacingProvider.getInstance().getKey(notifiedSide).get();
+            Location<World> location = new Location<>(world, VecHelper.toVector(offset));
+            if (location.getBlockY() >= 0 && location.getBlockY() <= 255) {
+                neighbors.put(direction, location.getBlock());
             }
         }
 
@@ -563,8 +563,8 @@ public class SpongeCommonEventFactory {
         return event;
     }
 
-    public static boolean handleImpactEvent(net.minecraft.entity.Entity projectile, ProjectileSource projectileSource, MovingObjectPosition
-            movingObjectPosition) {
+    public static boolean handleImpactEvent(net.minecraft.entity.Entity projectile, @Nullable ProjectileSource projectileSource,
+            MovingObjectPosition movingObjectPosition) {
         MovingObjectType movingObjectType = movingObjectPosition.typeOfHit;
         Cause cause = Cause.of(projectile, projectileSource == null ? ProjectileSource.UNKNOWN : projectileSource);
         IMixinEntity spongeEntity = (IMixinEntity) projectile;
@@ -573,7 +573,7 @@ public class SpongeCommonEventFactory {
             cause = cause.with(NamedCause.of(NamedCause.OWNER, owner.get()));
         }
 
-        Location<World> impactPoint = new Location<World>((World) projectile.worldObj, VecHelper.toVector(movingObjectPosition.hitVec));
+        Location<World> impactPoint = new Location<>((World) projectile.worldObj, VecHelper.toVector(movingObjectPosition.hitVec));
 
         if (movingObjectType == MovingObjectType.BLOCK) {
             BlockSnapshot targetBlock = ((World) projectile.worldObj).createSnapshot(VecHelper.toVector(movingObjectPosition.getBlockPos()));
@@ -677,22 +677,16 @@ public class SpongeCommonEventFactory {
         World world = (World) nmsWorld;
         Entity entity = (Entity) nmsEntity;
         List<NamedCause> list = new ArrayList<>();
-        if (nmsWorld.isRemote) { // Because the client is stupid
-            return world.spawnEntity(entity, Cause.of(NamedCause.source(SpawnCause.builder().type(SpawnTypes.CUSTOM).build())));
-        }
-        if (nmsEntity instanceof EntityPlayer) {
-            return world.spawnEntity(entity, Cause.of(NamedCause.source(SpawnCause.builder().type(SpawnTypes.CUSTOM).build())));
-        }
-        if (((IMixinWorld) nmsWorld).isWorldSpawnerRunning()) {
-            return world.spawnEntity(entity, Cause.of(NamedCause.source(SpawnCause.builder().type(SpawnTypes.CUSTOM).build())));
+        if (nmsWorld.isRemote || nmsEntity instanceof EntityPlayer || ((IMixinWorld) nmsWorld).isWorldSpawnerRunning()) {
+            return world.spawnEntity(entity, Cause.of(NamedCause.source(SpawnCause.builder().type(InternalSpawnTypes.CUSTOM).build())));
         }
         if (StaticMixinHelper.runningGenerator != null) {
             PopulatorType type = StaticMixinHelper.runningGenerator;
             if (InternalPopulatorTypes.ANIMAL.equals(type)) {
-                list.add(NamedCause.source(SpawnCause.builder().type(SpawnTypes.WORLD_SPAWNER).build()));
+                list.add(NamedCause.source(SpawnCause.builder().type(InternalSpawnTypes.WORLD_SPAWNER).build()));
                 list.add(NamedCause.of("AnimalSpawner", StaticMixinHelper.runningGenerator));
             } else {
-                list.add(NamedCause.source(SpawnCause.builder().type(SpawnTypes.STRUCTURE).build()));
+                list.add(NamedCause.source(SpawnCause.builder().type(InternalSpawnTypes.STRUCTURE).build()));
                 list.add(NamedCause.of("Structure", StaticMixinHelper.runningGenerator));
             }
         } else {
@@ -703,25 +697,25 @@ public class SpongeCommonEventFactory {
                 if (currentTickBlock.isPresent()) {
                     BlockSpawnCause blockSpawnCause = BlockSpawnCause.builder()
                             .block(currentTickBlock.get())
-                            .type(SpawnTypes.DISPENSE)
+                            .type(InternalSpawnTypes.DISPENSE)
                             .build();
                     list.add(NamedCause.source(blockSpawnCause));
                 } else if (currentTickTileEntity.isPresent()) {
                     BlockSpawnCause blockSpawnCause = BlockSpawnCause.builder()
                             .block(currentTickTileEntity.get().getLocation().createSnapshot())
-                            .type(SpawnTypes.DISPENSE)
+                            .type(InternalSpawnTypes.DISPENSE)
                             .build();
                     list.add(NamedCause.source(blockSpawnCause));
                 } else if (currentTickEntity.isPresent()) {
                     if  (currentTickEntity.get() == entity) {
                         SpawnCause cause = SpawnCause.builder()
-                                .type(SpawnTypes.DISPENSE)
+                                .type(InternalSpawnTypes.DISPENSE)
                                 .build();
                         list.add(NamedCause.source(cause));
                     } else {
                         EntitySpawnCause cause = EntitySpawnCause.builder()
                                 .entity(currentTickEntity.get())
-                                .type(SpawnTypes.DISPENSE)
+                                .type(InternalSpawnTypes.DISPENSE)
                                 .build();
                         list.add(NamedCause.source(cause));
                     }
@@ -729,19 +723,19 @@ public class SpongeCommonEventFactory {
             } else if (nmsEntity instanceof EntityItem) {
                 if (((IMixinWorld) world).capturingTerrainGen()) {
                     // Just default to the structures placing it.
-                    list.add(NamedCause.source(SpawnCause.builder().type(SpawnTypes.STRUCTURE).build()));
+                    list.add(NamedCause.source(SpawnCause.builder().type(InternalSpawnTypes.STRUCTURE).build()));
                     return world.spawnEntity(entity, Cause.of(list));
                 }
                 if (currentTickBlock.isPresent()) {
                     BlockSpawnCause blockSpawnCause = BlockSpawnCause.builder()
                             .block(currentTickBlock.get())
-                            .type(SpawnTypes.BLOCK_SPAWNING)
+                            .type(InternalSpawnTypes.BLOCK_SPAWNING)
                             .build();
                     list.add(NamedCause.source(blockSpawnCause));
                 } else if (currentTickTileEntity.isPresent()) {
                     BlockSpawnCause blockSpawnCause = BlockSpawnCause.builder()
                             .block(currentTickTileEntity.get().getLocation().createSnapshot())
-                            .type(SpawnTypes.BLOCK_SPAWNING)
+                            .type(InternalSpawnTypes.BLOCK_SPAWNING)
                             .build();
                     list.add(NamedCause.source(blockSpawnCause));
                 } else if (StaticMixinHelper.dropCause != null) {
@@ -751,13 +745,13 @@ public class SpongeCommonEventFactory {
                 } else if (currentTickEntity.isPresent()) {
                     if  (currentTickEntity.get() == entity) {
                         SpawnCause cause = SpawnCause.builder()
-                                .type(SpawnTypes.CUSTOM)
+                                .type(InternalSpawnTypes.CUSTOM)
                                 .build();
                         list.add(NamedCause.source(cause));
                     } else {
                         EntitySpawnCause cause = EntitySpawnCause.builder()
                                 .entity(currentTickEntity.get())
-                                .type(SpawnTypes.PASSIVE)
+                                .type(InternalSpawnTypes.PASSIVE)
                                 .build();
                         list.add(NamedCause.source(cause));
                     }
@@ -769,7 +763,7 @@ public class SpongeCommonEventFactory {
                     Entity currentEntity = currentTickEntity.get();
                     EntitySpawnCause spawnCause = EntitySpawnCause.builder()
                             .entity(currentEntity)
-                            .type(SpawnTypes.EXPERIENCE)
+                            .type(InternalSpawnTypes.EXPERIENCE)
                             .build();
                     list.add(NamedCause.source(spawnCause));
                     if (isEntityDead(currentEntity)) {
@@ -785,18 +779,18 @@ public class SpongeCommonEventFactory {
                 } else if (currentTickBlock.isPresent()) {
                     BlockSpawnCause spawnCause = BlockSpawnCause.builder()
                             .block(currentTickBlock.get())
-                            .type(SpawnTypes.EXPERIENCE)
+                            .type(InternalSpawnTypes.EXPERIENCE)
                             .build();
                     list.add(NamedCause.source(spawnCause));
                 } else if (currentTickTileEntity.isPresent()) {
                     SpawnCause spawnCause = BlockSpawnCause.builder()
                             .block(currentTickTileEntity.get().getLocation().createSnapshot())
-                            .type(SpawnTypes.EXPERIENCE)
+                            .type(InternalSpawnTypes.EXPERIENCE)
                             .build();
                     list.add(NamedCause.source(spawnCause));
                 } else {
                     SpawnCause spawnCause = SpawnCause.builder()
-                            .type(SpawnTypes.EXPERIENCE)
+                            .type(InternalSpawnTypes.EXPERIENCE)
                             .build();
                     list.add(NamedCause.source(spawnCause));
                 }
@@ -805,17 +799,17 @@ public class SpongeCommonEventFactory {
                 if (entity instanceof Projectile || entity instanceof EntityThrowable) {
                     cause = EntitySpawnCause.builder()
                             .entity(((Entity) StaticMixinHelper.packetPlayer))
-                            .type(SpawnTypes.PROJECTILE)
+                            .type(InternalSpawnTypes.PROJECTILE)
                             .build();
                 } else if (StaticMixinHelper.prePacketProcessItem.getItem() == Items.spawn_egg) {
                     cause = EntitySpawnCause.builder()
                             .entity((Entity) StaticMixinHelper.packetPlayer)
-                            .type(SpawnTypes.SPAWN_EGG)
+                            .type(InternalSpawnTypes.SPAWN_EGG)
                             .build();
                 } else {
                     cause = EntitySpawnCause.builder()
                             .entity((Entity) StaticMixinHelper.packetPlayer)
-                            .type(SpawnTypes.PLACEMENT)
+                            .type(InternalSpawnTypes.PLACEMENT)
                             .build();
                 }
                 list.add(NamedCause.source(cause));
@@ -823,13 +817,13 @@ public class SpongeCommonEventFactory {
                 list.add(NamedCause.owner(StaticMixinHelper.packetPlayer));
             } else if (currentTickBlock.isPresent()) { // We've exhausted our possibilities, now we just associate blindly
                 BlockSpawnCause cause = BlockSpawnCause.builder().block(currentTickBlock.get())
-                        .type(SpawnTypes.BLOCK_SPAWNING)
+                        .type(InternalSpawnTypes.BLOCK_SPAWNING)
                         .build();
                 list.add(NamedCause.source(cause));
             } else if (currentTickEntity.isPresent()) {
                 Entity tickingEntity = currentTickEntity.get();
                 if (tickingEntity instanceof Ageable && tickingEntity.getClass() == entity.getClass()) { // We should assume breeding
-                    EntitySpawnCause spawnCause = EntitySpawnCause.builder().entity(tickingEntity).type(SpawnTypes.BREEDING).build();
+                    EntitySpawnCause spawnCause = EntitySpawnCause.builder().entity(tickingEntity).type(InternalSpawnTypes.BREEDING).build();
                     list.add(NamedCause.source(spawnCause));
                     if (tickingEntity instanceof EntityAnimal) {
                         if (((EntityAnimal) tickingEntity).getPlayerInLove() != null) {
@@ -837,14 +831,14 @@ public class SpongeCommonEventFactory {
                         }
                     }
                 }
-                EntitySpawnCause cause = EntitySpawnCause.builder().entity(currentTickEntity.get()).type(SpawnTypes.CUSTOM).build();
+                EntitySpawnCause cause = EntitySpawnCause.builder().entity(currentTickEntity.get()).type(InternalSpawnTypes.CUSTOM).build();
                 list.add(NamedCause.source(cause));
             } else {
-                list.add(NamedCause.source(SpawnCause.builder().type(SpawnTypes.CUSTOM).build()));
+                list.add(NamedCause.source(SpawnCause.builder().type(InternalSpawnTypes.CUSTOM).build()));
             }
         }
         if (list.isEmpty()) {
-            list.add(NamedCause.source(SpawnCause.builder().type(SpawnTypes.CUSTOM).build()));
+            list.add(NamedCause.source(SpawnCause.builder().type(InternalSpawnTypes.CUSTOM).build()));
         }
         return world.spawnEntity(entity, Cause.of(list));
     }
@@ -924,11 +918,11 @@ public class SpongeCommonEventFactory {
         if (!(root instanceof SpawnCause)) {
             SpawnCause spawnCause;
             if (StaticMixinHelper.packetPlayer == null) {
-                spawnCause = SpawnCause.builder().type(SpawnTypes.PLACEMENT).build();
+                spawnCause = SpawnCause.builder().type(InternalSpawnTypes.PLACEMENT).build();
             } else {
                 spawnCause = EntitySpawnCause.builder()
                         .entity((Entity) StaticMixinHelper.packetPlayer)
-                        .type(SpawnTypes.PLACEMENT)
+                        .type(InternalSpawnTypes.PLACEMENT)
                         .build();
             }
             List<NamedCause> causes = new ArrayList<>();
@@ -946,11 +940,11 @@ public class SpongeCommonEventFactory {
         if (!(root instanceof SpawnCause)) {
             SpawnCause spawnCause;
             if (StaticMixinHelper.packetPlayer == null) {
-                spawnCause = SpawnCause.builder().type(SpawnTypes.DROPPED_ITEM).build();
+                spawnCause = SpawnCause.builder().type(InternalSpawnTypes.DROPPED_ITEM).build();
             } else {
                 spawnCause = EntitySpawnCause.builder()
                         .entity((Entity) StaticMixinHelper.packetPlayer)
-                        .type(SpawnTypes.DROPPED_ITEM)
+                        .type(InternalSpawnTypes.DROPPED_ITEM)
                         .build();
             }
             List<NamedCause> causes = new ArrayList<>();

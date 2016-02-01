@@ -102,7 +102,7 @@ public interface IMixinWorld {
 
     void setWeatherStartTime(long weatherStartTime);
 
-    void notifyBlockOfStateChange(BlockPos notifyPos, Block sourceBlock, BlockPos sourcePos);
+    void notifyBlockOfStateChange(BlockPos notifyPos, Block sourceBlock, @Nullable BlockPos sourcePos);
 
     @Nullable
     EntityPlayer getClosestPlayerToEntityWhoAffectsSpawning(net.minecraft.entity.Entity entity, double distance);
