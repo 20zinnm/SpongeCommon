@@ -106,8 +106,8 @@ public class SpongeCommand {
                         INDENT, title("chunks"), LONG_INDENT, "Prints chunk data for a specific dimension or world(s)\n",
                         INDENT, title("conf"), LONG_INDENT, "Configure sponge settings\n",
                         INDENT, title("heap"), LONG_INDENT, "Dump live JVM heap\n",
-                        INDENT, title("reload"), LONG_INDENT, "Reloads a global, dimension, or world config\n",
-                        INDENT, title("save"), LONG_INDENT, "Saves a global, dimension, or world config\n",
+//                        INDENT, title("reload"), LONG_INDENT, "Reloads a global, dimension, or world config\n",
+//                        INDENT, title("save"), LONG_INDENT, "Saves a global, dimension, or world config\n",
                         INDENT, title("version"), LONG_INDENT, "Prints current Sponge version\n",
                         INDENT, title("audit"), LONG_INDENT, "Audit mixin classes for implementation",
                         INDENT, title("plugins"), LONG_INDENT, "List currently installed plugins"))
@@ -269,7 +269,7 @@ public class SpongeCommand {
                 })
                 .build();
         return CommandSpec.builder()
-                .description(Text.of("Inspect the Sponge configuration"))
+                .description(Text.of("Interact with the Sponge configuration"))
                 .arguments(seq(string(Text.of("key")), optional(string(Text.of("value")))))
                 .permission("sponge.command.config")
                 .executor(new ConfigUsingExecutor() {
