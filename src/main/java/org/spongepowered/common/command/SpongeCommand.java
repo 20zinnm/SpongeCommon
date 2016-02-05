@@ -98,8 +98,8 @@ public class SpongeCommand {
         nonFlagChildren.register(getTimingsCommand(), "timings");
         flagChildren.register(getChunksCommand(), "chunks");
         flagChildren.register(getConfigCommand(), "config");
-        flagChildren.register(getReloadCommand(), "reload"); // TODO: Should these two be subcommands of config, and what is now config be set?
-        flagChildren.register(getSaveCommand(), "save");
+        // The save/reload commands were moved to subcommands of config to make it
+        // even more obvious that they do NOT reload plugins, like Bukkit behavior.
         return CommandSpec.builder()
                 .description(Text.of("Text description"))
                 .extendedDescription(Text.of("commands:\n", // TODO: Automatically generate from child executors (wait for help system on this)
@@ -134,7 +134,7 @@ public class SpongeCommand {
                 for (DimensionType dimension : args.<DimensionType>getAll("dimension")) {
                     WorldProvider provider = DimensionManager.getWorldFromDimId(((SpongeDimensionType) dimension).getDimensionTypeId()).provider;
                     src.sendMessage(Text.of("Dimension ", dimension.getName(), ": ", processDimension(((IMixinWorldProvider) provider)
-                                    .getDimensionConfig(), dimension, src, args)));
+                            .getDimensionConfig(), dimension, src, args)));
                     ++successes;
                 }
             }
@@ -161,12 +161,12 @@ public class SpongeCommand {
         }
 
         protected Text processDimension(SpongeConfig<SpongeConfig.DimensionConfig> config, DimensionType dim, CommandSource source,
-                CommandContext args) throws CommandException {
+                                        CommandContext args) throws CommandException {
             return process(config, source, args);
         }
 
         protected Text processWorld(SpongeConfig<SpongeConfig.WorldConfig> config, World world, CommandSource source,
-                CommandContext args) throws CommandException {
+                                    CommandContext args) throws CommandException {
             return process(config, source, args);
         }
 
@@ -188,7 +188,7 @@ public class SpongeCommand {
                         CommandResult res = super.execute(src, args);
                         if (args.hasAny("dump")) {
                             File file = new File(new File(new File("."), "chunk-dumps"),
-                                "chunk-info-" + DateTimeFormatter.ofPattern("yyyy-MM-dd_HH.mm.ss").format(Instant.now()) + "-server.txt");
+                                    "chunk-info-" + DateTimeFormatter.ofPattern("yyyy-MM-dd_HH.mm.ss").format(Instant.now()) + "-server.txt");
                             src.sendMessage(Text.of("Writing chunk info to: ", file));
                             ChunkSaveHelper.writeChunks(file, args.hasAny("dump-all"));
                             src.sendMessage(Text.of("Chunk info complete"));
@@ -208,11 +208,11 @@ public class SpongeCommand {
 
                     @Override
                     protected Text processDimension(SpongeConfig<SpongeConfig.DimensionConfig> config, DimensionType dim, CommandSource source,
-                            CommandContext args)
+                                                    CommandContext args)
                             throws CommandException {
                         SpongeImpl.getGame().getServer().getWorlds().stream().filter(world -> world.getDimension().getType().equals(dim))
-                            .forEach(world -> source.sendMessage(Text.of("World ", Text.of(TextStyles.BOLD, world.getName()),
-                                                                      getChunksInfo(((WorldServer) world)))));
+                                .forEach(world -> source.sendMessage(Text.of("World ", Text.of(TextStyles.BOLD, world.getName()),
+                                        getChunksInfo(((WorldServer) world)))));
                         return Text.of("Printed chunk info for all worlds in dimension ", dim.getName());
                     }
 
@@ -245,8 +245,30 @@ public class SpongeCommand {
     }
 
     private static CommandSpec getConfigCommand() {
+        CommandSpec reloadSpec = CommandSpec.builder()
+                .description(Text.of("Reload the Sponge configuration"))
+                .permission("sponge.command.reload")
+                .executor(new ConfigUsingExecutor() {
+                    @Override
+                    protected Text process(SpongeConfig<?> config, CommandSource source, CommandContext args) throws CommandException {
+                        config.reload();
+                        return Text.of("Reloaded configuration");
+                    }
+                })
+                .build();
+        CommandSpec saveSpec = CommandSpec.builder()
+                .description(Text.of("Save the configuration"))
+                .permission("sponge.command.save")
+                .executor(new ConfigUsingExecutor() {
+                    @Override
+                    protected Text process(SpongeConfig<?> config, CommandSource source, CommandContext args) throws CommandException {
+                        config.save();
+                        return Text.of("Saved");
+                    }
+                })
+                .build();
         return CommandSpec.builder()
-                .description(Text.of("Inspect the Sponge config"))
+                .description(Text.of("Inspect the Sponge configuration"))
                 .arguments(seq(string(Text.of("key")), optional(string(Text.of("value")))))
                 .permission("sponge.command.config")
                 .executor(new ConfigUsingExecutor() {
@@ -270,34 +292,8 @@ public class SpongeCommand {
                         }
                     }
                 })
-                .build();
-    }
-
-    private static CommandSpec getReloadCommand() {
-        return CommandSpec.builder()
-                .description(Text.of("Reload the Sponge configuration"))
-                .permission("sponge.command.reload")
-                .executor(new ConfigUsingExecutor() {
-                    @Override
-                    protected Text process(SpongeConfig<?> config, CommandSource source, CommandContext args) throws CommandException {
-                        config.reload();
-                        return Text.of("Reloaded configuration");
-                    }
-                })
-                .build();
-    }
-
-    private static CommandSpec getSaveCommand() {
-        return CommandSpec.builder()
-                .description(Text.of("Save the configuration"))
-                .permission("sponge.command.save")
-                .executor(new ConfigUsingExecutor() {
-                    @Override
-                    protected Text process(SpongeConfig<?> config, CommandSource source, CommandContext args) throws CommandException {
-                        config.save();
-                        return Text.of("Saved");
-                    }
-                })
+                .child(reloadSpec, "reload")
+                .child(saveSpec, "save")
                 .build();
     }
 
