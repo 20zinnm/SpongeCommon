@@ -244,6 +244,7 @@ public class SpongeCommand {
                 .build();
     }
 
+    // Now includes save and reload subcommands.
     private static CommandSpec getConfigCommand() {
         CommandSpec reloadSpec = CommandSpec.builder()
                 .description(Text.of("Reload the Sponge configuration"))
