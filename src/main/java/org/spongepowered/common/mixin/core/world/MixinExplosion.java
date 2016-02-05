@@ -57,7 +57,7 @@ public abstract class MixinExplosion implements Explosion, IMixinExplosion {
     @Shadow public Entity exploder;
     @Shadow public float explosionSize;
 
-    @Inject(method = "<init>*", at = @At("RETURN"))
+    @Inject(method = "<init>(Lnet/minecraft/world/World;Lnet/minecraft/entity/Entity;DDDFZZ)V", at = @At("RETURN"))
     public void onConstructed(net.minecraft.world.World world, Entity entity, double originX, double originY,
             double originZ, float radius, boolean isFlaming, boolean isSmoking,
             CallbackInfo ci) {

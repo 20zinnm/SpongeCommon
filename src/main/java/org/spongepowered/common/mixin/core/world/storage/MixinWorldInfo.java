@@ -141,7 +141,7 @@ public abstract class MixinWorldInfo implements WorldProperties, IMixinWorldInfo
     @Shadow private GameRules theGameRules;
     @Shadow public abstract NBTTagCompound getNBTTagCompound();
 
-    @Inject(method = "<init>", at = @At("RETURN") )
+    @Inject(method = "<init>()V", at = @At("RETURN") )
     public void onConstruction(CallbackInfo ci) {
         this.spongeRootLevelNbt = new NBTTagCompound();
         this.spongeNbt = new NBTTagCompound();
@@ -154,7 +154,7 @@ public abstract class MixinWorldInfo implements WorldProperties, IMixinWorldInfo
         }
     }
 
-    @Inject(method = "<init>*", at = @At("RETURN") )
+    @Inject(method = "<init>(Lnet/minecraft/world/WorldSettings;Ljava/lang/String;)V", at = @At("RETURN") )
     public void onConstruction(WorldSettings settings, String name, CallbackInfo ci) {
         if (name.equals("MpServer")) {
             return;
@@ -191,14 +191,14 @@ public abstract class MixinWorldInfo implements WorldProperties, IMixinWorldInfo
         this.worldConfig.save();
     }
 
-    @Inject(method = "<init>*", at = @At("RETURN") )
+    @Inject(method = "<init>(Lnet/minecraft/nbt/NBTTagCompound;)V", at = @At("RETURN") )
     public void onConstruction(NBTTagCompound nbt, CallbackInfo ci) {
         if (!StaticMixinHelper.convertingMapFormat) {
             onConstruction(ci);
         }
     }
 
-    @Inject(method = "<init>*", at = @At("RETURN") )
+    @Inject(method = "<init>(Lnet/minecraft/world/storage/WorldInfo;)V", at = @At("RETURN") )
     public void onConstruction(WorldInfo worldInformation, CallbackInfo ci) {
         onConstruction(ci);
 
